@@ -1,8 +1,13 @@
 # frozen_string_literal: true
 
+require 'blueprinter/extractors/auto_extractor'
+require 'blueprinter/formatters/date_time_formatter'
+
 # @api private
 module Blueprinter
   class Field
+    DATETIME_FORMATTER = DateTimeFormatter.new
+
     attr_reader :method, :name, :extractor, :options, :blueprint
 
     def initialize(method, name, extractor, blueprint, options = {})
@@ -11,9 +16,12 @@ module Blueprinter
       @extractor = extractor
       @blueprint = blueprint
       @options = options
+      @plain_extraction = plain_extraction?
     end
 
     def extract(object, local_options)
+      return extract_plain(object) if @plain_extraction
+
       extractor.extract(method, object, local_options, options)
     end
 
@@ -24,6 +32,22 @@ module Blueprinter
     end
 
     private
+
+    # Whether this field can skip AutoExtractor: fields with a block
+    def plain_extraction?
+      extractor.instance_of?(AutoExtractor) &&
+        !options[:block] &&
+        !options[:datetime_format] &&
+        !options[:default_if] &&
+        !options.key?(:default)
+    end
+
+    # Equivalent to AutoExtractor#extract for plain fields.
+    def extract_plain(object)
+      value = object.is_a?(Hash) ? object[method] : object.public_send(method)
+      value = DATETIME_FORMATTER.format(value, options) if !value.nil? && Blueprinter.configuration.datetime_format
+      value.nil? ? Blueprinter.configuration.field_default : value
+    end
 
     def if_callable
       @_if_callable ||= callable_from(:if)
