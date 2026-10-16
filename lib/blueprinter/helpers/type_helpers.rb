@@ -5,6 +5,8 @@ module Blueprinter
     private
 
     def array_like?(object)
+      return true if object.is_a?(Array)
+
       Blueprinter.configuration.array_like_classes.any? do |klass|
         object.is_a?(klass)
       end
