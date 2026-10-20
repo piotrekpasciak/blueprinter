@@ -1,5 +1,5 @@
 ## Unreleased
---
+- 🚀 [FEATURE] Adds opt-in compiled views (`config.compile_views = true`), which compile each view into plain Ruby methods on first render. Output is identical to standard rendering, and rendering is several times faster.
 
 ## 1.3.0 - 2026/04/14
 - 🚀 [FEATURE] Adds support for `Symbol#to_proc` syntax in fields and identifiers. See [#546](https://github.com/procore-oss/blueprinter/pull/546). Thanks to [@tob1k](https://github.com/tob1k).

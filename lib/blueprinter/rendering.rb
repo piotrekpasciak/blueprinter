@@ -4,6 +4,7 @@ require 'blueprinter/errors/invalid_root'
 require 'blueprinter/errors/meta_requires_root'
 require 'blueprinter/errors/unknown_view'
 require 'blueprinter/deprecation'
+require 'blueprinter/compiler'
 
 module Blueprinter
   # Encapsulates the rendering logic for Blueprinter.
@@ -126,6 +127,9 @@ module Blueprinter
       # Since we're currently providing the current view in the local_options hash when we extract fields, we can merge
       # it in ahead of time to avoid allocating a new hash for every field extraction.
       local_options_with_view = local_options.merge(view: view_name)
+      if Blueprinter.configuration.compile_views
+        return __send__(Compiler.entry_point(self, view_name), object, local_options_with_view)
+      end
 
       if array_like?(object)
         object.map do |obj|
