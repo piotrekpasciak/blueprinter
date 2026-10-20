@@ -1154,6 +1154,48 @@ Gems can be created that enrich `blueprinter`'s core functionality via extension
 </details>
 
 <details>
+<summary>Compiled Views</summary>
+
+
+Blueprinter can compile each view into plain Ruby methods on first render, which makes rendering several times
+faster. Output is identical to standard rendering. It is opt-in:
+
+```ruby
+Blueprinter.configure do |config|
+  config.compile_views = true
+end
+```
+
+A compiled view builds each object's Hash directly, much like a hand-written serializer would:
+
+```ruby
+# class UserBlueprint < Blueprinter::Base
+#   identifier :id
+#   fields :first_name, :last_name
+# end
+#
+# compiles to (roughly):
+{ id: object.id, first_name: object.first_name, last_name: object.last_name }
+```
+
+Field options (`name`, blocks, `if`/`unless`, `exclude_if_nil`, `default`, `default_if`, `datetime_format`),
+associations, transformers, extensions, and the global configuration are all supported. Fields that use a custom
+extractor, associations with a Proc `:blueprint` or with `:options` keep using the standard rendering code within the
+compiled view.
+
+Things to know:
+- Views compile on first render. They recompile automatically whenever Blueprinter refreshes its view cache (e.g.
+  after a `view` block), and when `datetime_format`, `field_default`, `association_default`, `if` or `unless` is
+  changed in the configuration.
+- Plain fields read values directly (`object.name` / `object[:name]`), so patches applied directly to Blueprinter's
+  internal `AutoExtractor`, `PublicSendExtractor` or `HashExtractor` classes are not used for them. Custom extractors
+  configured with `extractor_default` or `extractor:` are always used.
+- Overrides of a Blueprint's private `object_to_hash` method are not used, and overrides of `hashify` or
+  `prepare_data` are not called for associations rendered by a compiled view.
+
+</details>
+
+<details>
 <summary>Deprecations</summary>
 
 

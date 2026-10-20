@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'blueprinter/view'
+require 'blueprinter/compiler'
 
 module Blueprinter
   # @api private
@@ -20,9 +21,11 @@ module Blueprinter
   #
   # rubocop:disable Metrics/ClassLength
   class ViewCollection
-    attr_reader :views, :sort_by_definition
+    attr_reader :views, :sort_by_definition, :cache_version
 
-    def initialize
+    # @param owner [Class, nil] the Blueprint this collection belongs to; its compiled views (see Compiler) are reset
+    #   whenever the cache is invalidated
+    def initialize(owner = nil)
       @views = {
         identifier: View.new(:identifier),
         default: View.new(:default)
@@ -30,6 +33,8 @@ module Blueprinter
       @sort_by_definition = Blueprinter.configuration.sort_fields_by.eql?(:definition)
       @cache_mutex = Mutex.new
       @cache = nil
+      @owner = owner
+      @cache_version = 0
     end
 
     def inherit(view_collection)
@@ -44,6 +49,8 @@ module Blueprinter
     # exclusions, or transformers to ensure the cache reflects the current state.
     def invalidate_cache!
       @cache = nil
+      @cache_version += 1
+      Compiler.reset(@owner) if @owner
     end
 
     # @param [String] view_name

@@ -22,6 +22,7 @@ module Blueprinter
     # Resets global configuration.
     def reset_configuration!
       @_configuration = nil
+      Compiler.reset_all! if defined?(Compiler)
     end
   end
 end

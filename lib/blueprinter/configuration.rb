@@ -3,23 +3,32 @@
 require 'json'
 require 'blueprinter/extensions'
 require 'blueprinter/extractors/auto_extractor'
+require 'blueprinter/compiler'
 
 module Blueprinter
   class Configuration
     attr_accessor(
-      :association_default,
       :custom_array_like_classes,
-      :datetime_format,
       :default_transformers,
       :deprecations,
-      :field_default,
       :generator,
-      :if,
       :method,
-      :sort_fields_by,
-      :unless
+      :sort_fields_by
     )
-    attr_reader :extensions, :extractor_default
+    attr_reader :extensions, :extractor_default, :compile_views
+
+    # Settings that compiled views read when they are compiled. Changing one discards compiled views, so they are
+    # compiled again with the new value on their next render.
+    COMPILED_SETTINGS = %i[association_default datetime_format field_default if unless].freeze
+
+    COMPILED_SETTINGS.each do |setting|
+      attr_reader setting
+
+      define_method(:"#{setting}=") do |value|
+        instance_variable_set(:"@#{setting}", value)
+        Compiler.reset_all!
+      end
+    end
 
     VALID_CALLABLES = %i[if unless].freeze
 
@@ -37,6 +46,14 @@ module Blueprinter
       @default_transformers = []
       @custom_array_like_classes = []
       @extensions = Extensions.new
+      @compile_views = false
+    end
+
+    # Opt-in: render with each view compiled into plain Ruby methods. Output is the same as standard rendering; fields
+    # that can't be compiled (e.g. custom extractors) keep using the standard code path.
+    def compile_views=(enabled)
+      @compile_views = enabled ? true : false
+      Compiler.reset_all!
     end
 
     def extensions=(list)
