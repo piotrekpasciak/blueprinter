@@ -126,6 +126,7 @@ module Blueprinter
       # Since we're currently providing the current view in the local_options hash when we extract fields, we can merge
       # it in ahead of time to avoid allocating a new hash for every field extraction.
       local_options_with_view = local_options.merge(view: view_name)
+      compiled = compiled_view(view_name)
 
       # Loop invariants: the compiled render closures and transformers for this view are identical
       # for every object in a collection, so resolve them once here rather than per object.
@@ -133,11 +134,31 @@ module Blueprinter
 
       if array_like?(object)
         object.map do |obj|
+          next compiled.call(obj, local_options_with_view) if compiled && !obj.is_a?(Hash)
+
           object_to_hash(obj, compiled_fields:, transformers:, local_options: local_options_with_view)
         end
       else
-        object_to_hash(object, compiled_fields:, transformers:, local_options: local_options_with_view)
+        hash_for(object, compiled_fields, transformers, local_options_with_view, compiled)
       end
+    end
+
+    # Hashes always use the standard path: the compiled view reads values with method calls
+    def hash_for(object, compiled_fields, transformers, local_options, compiled)
+      return compiled.call(object, local_options) if compiled && !object.is_a?(Hash)
+
+      object_to_hash(object, compiled_fields:, transformers:, local_options:)
+    end
+
+    # The compiled view (see ViewCompiler), or nil when compiled views are off or a global setting that compiled views
+    # don't handle is set
+    def compiled_view(view_name)
+      config = Blueprinter.configuration
+      return unless config.compile_views
+      return unless config.datetime_format.nil? && config.field_default.nil? && config.association_default.nil? &&
+                    config.if.nil? && config.unless.nil?
+
+      view_collection.compiled(view_name)
     end
 
     def object_to_hash(object, compiled_fields:, transformers:, local_options:)

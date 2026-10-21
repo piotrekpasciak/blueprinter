@@ -30,6 +30,7 @@ module Blueprinter
     # @api private
     LIVE_ATTRIBUTES = %i[
       association_default
+      compile_views
       deprecations
       generator
       method
@@ -94,6 +95,7 @@ module Blueprinter
       @method = :generate
       @sort_fields_by = :name_asc
       @unless = nil
+      @compile_views = false
     end
 
     def extensions=(list)
