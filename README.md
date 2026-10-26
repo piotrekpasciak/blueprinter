@@ -1186,7 +1186,7 @@ Things to know:
 - While `datetime_format`, `field_default`, `association_default`, `if` or `unless` is set in the global configuration,
   renders use standard rendering. Hash objects are also always rendered the standard way.
 - Compiled views are stored with Blueprinter's view cache and rebuilt whenever it is refreshed (e.g. after a `view`
-  block).
+  block, or after `datetime_format`, `field_default`, `if`, `unless` or `default_transformers` is changed).
 - Compiled fields read values directly (`object.name`), so patches applied directly to Blueprinter's internal
   `AutoExtractor`, `PublicSendExtractor` or `AssociationExtractor` classes are not used for them. Custom extractors
   configured with `extractor_default` or `extractor:` are always used.

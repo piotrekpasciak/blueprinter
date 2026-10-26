@@ -2,7 +2,7 @@
 title: "Architecture"
 type: explanation
 description: "Build a working model of how a blueprint is defined, compiled, and rendered, and why each mechanism has its shape."
-generated: { by: cursor/claude-fable-5.1, at: "2026-10-23T14:00:43Z" }
+generated: { by: claude-code/claude-opus-5-5, at: "2026-10-26T21:09:49Z" }
 verified:
   - { by: human:lessthanjacob, at: "2026-10-21T23:24:23Z" }
 ---
@@ -48,7 +48,7 @@ UserBlueprint.render(user, view: :extended)
 | **Extension**       | A globally registered object that is able to modify the input object before it is rendered.                                                                                    |
 | **`local_options`** | The options passed to `render`, minus `:view`, `:root`, and `:meta`, plus the current `view:`. They reach conditions, blocks, extractors, transformers, and nested blueprints. |
 | **View collection** | A blueprint's views, held by one `ViewCollection` per blueprint class.                                                                                                         |
-| **Snapshot**        | Each view's final field list, compiled field closures, and transformer list, frozen together with the configuration generation they were built for.                             |
+| **Snapshot**        | Each view's final field list, compiled field closures, and transformer list, frozen together with the configuration generation they were built for. With `compile_views`, it also holds each view's compiled module. |
 
 Each blueprint goes through three phases:
 
@@ -65,7 +65,7 @@ Questions about rendered output (why a field is missing, why an extension saw a 
 1. `render(object, view: :extended, root:, meta:, **other)` picks the view (`:default` when none is given), and the remaining options become `local_options` (`Rendering#build_result`).
 2. `Rendering#hashify` raises `Errors::UnknownView` if the blueprint has no such view, then passes the object through every registered extension's `pre_render`, which may return a replacement.
 3. `Rendering#prepare_data` adds `view:` to `local_options`. If the object is **array-like** (`Array`, `ActiveRecord::Relation` when loaded, or anything in `config.custom_array_like_classes`), each element is rendered separately and the result is an `Array`.
-4. For each object, `object_to_hash` calls that view's compiled field closures. A plain field is an `AutoExtractor` field with no block, `:if` / `:unless`, datetime format, default, or `exclude_if_nil`, and with no global `datetime_format`, `field_default`, `if`, or `unless`: its closure reads a `Hash` key or calls `public_send` and stores the value. Every other closure checks `:if` / `:unless`, reads through the field's extractor, drops a `nil` marked `exclude_if_nil`, and stores the value. An association renders its value by calling `hashify` on its own blueprint and view, so steps 2 to 5 repeat for every nested object.
+4. For each object, `object_to_hash` calls that view's compiled field closures. A plain field is an `AutoExtractor` field with no block, `:if` / `:unless`, datetime format, default, or `exclude_if_nil`, and with no global `datetime_format`, `field_default`, `if`, or `unless`: its closure reads a `Hash` key or calls `public_send` and stores the value. Every other closure checks `:if` / `:unless`, reads through the field's extractor, drops a `nil` marked `exclude_if_nil`, and stores the value. An association renders its value by calling `hashify` on its own blueprint and view, so steps 2 to 5 repeat for every nested object. With `config.compile_views` on, a non-`Hash` object is rendered by the view's compiled module instead ([compiled views](#compiled-views)).
 5. The view's transformers run on the finished `Hash`.
 6. `:root` wraps the result and `:meta` adds a sibling key (top level only). `render` then converts to JSON with the configured generator; `render_as_hash` returns the `Hash`; `render_as_json` calls `.as_json` on it, which requires `ActiveSupport` in the host app.
 
@@ -120,13 +120,13 @@ sequenceDiagram
 
 - `AutoExtractor` is the default extractor. It calls the field's block if there is one (`BlockExtractor`), else reads `object[name]` from a `Hash` (symbol keys only, `HashExtractor`), else calls `object.public_send(name)` (`PublicSendExtractor`). It then applies `:datetime_format` and `:default` / `:default_if`. A field's extractor is chosen when the field is defined.
 - Field blocks receive `local_options` as keyword arguments. A block that takes `|obj|` or `|obj, options|` works, but one that names a keyword must also accept `**` (`{ |obj, foo:, **| ... }`), since every render passes `view:` plus all render options. That makes every key in `local_options` is part of the public contract ([public API](#public-api-and-compatibility)). `Symbol#to_proc` blocks (`field :display_name, &:formatted_full_name`) receive only the object, so they call that method on it.
-- `:if` / `:unless` conditions take a `Proc`, called with `(field_name, object, local_options)`, or a `Symbol` naming a method on the blueprint class, so it must be defined with `def self.`. A field-level condition wins over `config.if` / `config.unless`. A field looks up its condition on every check until it finds one, then keeps it. They are resolved in execution order: when `if` skips a field, `unless` is not resolved or called. A `Symbol` is resolved on the first `skip?` that needs it, which is when a render includes that field, not when the pipeline for some other view is compiled.
+- `:if` / `:unless` conditions take a `Proc`, called with `(field_name, object, local_options)`, or a `Symbol` naming a method on the blueprint class, so it must be defined with `def self.`. A field-level condition wins over `config.if` / `config.unless`. The first `skip?` resolves the field's condition, or the absence of one, and keeps it, so a global `config.if` / `config.unless` set later is ignored for a field that has already run `skip?`. Plain fields never run `skip?`, so they pick up a new global condition when the pipeline is rebuilt; neither do fields that a compiled view writes inline ([compiled views](#compiled-views)). They are resolved in execution order: when `if` skips a field, `unless` is not resolved or called. A `Symbol` is resolved on the first `skip?` that needs it, which is when a render includes that field, not when the pipeline for some other view is compiled.
 - An association runs its own blueprint's `hashify`, so the `UnknownView` check and `pre_render` run for every associated object. `:options` on an association (a `Hash`, or a `Proc` given the parent object) is merged into the nested `local_options`.
 - Transformers mutate the `Hash` in place; their return value is ignored.
 
 ### Render Performance
 
-Rendering runs once per field per object, so its cost grows with the size of the output. The **render hot path** is `Rendering#object_to_hash`. Plain fields stop there: the compiled closure reads the value and writes the result hash. Every other field continues through `Field#skip?`, `Field#extract`, `AutoExtractor#extract`, or `AssociationExtractor#extract`.
+Rendering runs once per field per object, so its cost grows with the size of the output. The **render hot path** is `Rendering#object_to_hash`. Plain fields stop there: the compiled closure reads the value and writes the result hash. Every other field continues through `Field#skip?`, `Field#extract`, `AutoExtractor#extract`, or `AssociationExtractor#extract`. With `compile_views` on, the hot path is the generated `call` method and `ViewCompiler.render_association`.
 
 Changes to these methods follow three rules:
 
@@ -216,6 +216,16 @@ The `:default` view's transformers run first, in definition order. Then come the
 - Anything else that changes a view after the first render must call `ViewCollection#invalidate_cache!`. For example, `UserBlueprint.field :late` at runtime adds to `:default` without invalidating, so it stays invisible until something else does.
 - `Base.reflections` (the introspection API that lists a blueprint's views, fields, and associations for tooling) keeps its own memo, as do `Reflection::View#fields` and `#associations`. None of them is reset, so views and fields added after the first `reflections` call are missing from it even though rendering sees them.
 
+### Compiled Views
+
+`config.compile_views = true` (off by default) adds a second layer on top of the compiled closures. `ViewCollection#compiled` builds, on the first render of a view, a module whose generated `call(object, options)` returns the object's `Hash` from a `Hash` literal and direct method calls (`ViewCompiler.compile`). The module is stored in the snapshot's `compiled` slot, so invalidation and generation bumps discard it with everything else.
+
+- Plain reads, blocks, field-level `:if` / `:unless`, and `exclude_if_nil` are written as Ruby code. An association with a static `blueprint:`, no `:options`, and a view that exists calls `ViewCompiler.render_association`, which runs `pre_render` and then the child's compiled module directly. It skips the child's `hashify` and `prepare_data`, and passes the parent's options `Hash` unchanged when the view is the same.
+- Every other field (`:default`, `:default_if`, `:datetime_format`, custom extractors, other associations) calls its closure from `Field#compile`, so its behavior matches the standard path.
+- `Rendering#compiled_view` checks on every render that global `datetime_format`, `field_default`, `association_default`, `if`, and `unless` are unset; otherwise that render uses the standard path. `Hash` objects always use the standard path.
+- Blocks, callables, closures, transformers, and unusual names live in the module's `REFS` constant, referenced by index, so user-provided text is never interpolated as code.
+- `BLUEPRINTER_COMPILE_VIEWS=1 bundle exec rspec` runs the whole suite with compiled views on.
+
 ### Why Compile?
 
 Compiling once keeps per-render work proportional to the fields rendered. Without the snapshot, every render rebuilds each view's field list (defaults, included views, exclusions, sorting).
@@ -247,7 +257,7 @@ Blueprinter loads in two ways for two reasons. **Autoloading** lets an app refer
 A blueprint class is shared by every thread in a multi-threaded server, so anything it caches has to be safe to read concurrently.
 
 - Two mutexes live under `lib/`: `ViewCollection`'s cache mutex and `Configuration`'s generation mutex. They are never nested. `ensure_cached!` reads the snapshot without the cache lock, builds it under that lock with a second check, and publishes it with one reference assignment, so renders after the first take no cache lock.
-- The snapshot's `Hash`es and `Array`s are frozen; the `Field` and transformer objects inside them are not. The configuration generation is a key in that frozen hash, not a second ivar.
+- The snapshot's `Hash`es and `Array`s are frozen, except its `compiled` `Hash`, which `ViewCollection#compiled` fills without a lock: two threads may compile the same view, and either equivalent module is kept. The `Field` and transformer objects inside the snapshot are not frozen. The configuration generation is a key in that frozen hash, not a second ivar.
 - `Configuration.generation` is a frozen one-element array swapped under its mutex, so the increment cannot be lost and readers see the new integer by one reference read.
 - The DSL is unsynchronized and assumes class bodies run before concurrent renders start.
 - Not safe: DSL calls that invalidate while other threads render. `invalidate_cache!` nils the snapshot without the lock, and a compile that has already started can publish over that nil.

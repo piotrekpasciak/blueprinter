@@ -7,12 +7,13 @@ module Blueprinter
   # method calls, e.g. `{ id: object.id, name: object.name }`. Used when `Blueprinter.configuration.compile_views` is on.
   #
   # Only simple fields are compiled: values read with AutoExtractor (by method or block), optionally with if/unless and
-  # exclude_if_nil. Every other field (associations, defaults, datetime formats, custom extractors) calls Field#skip? and
-  # Field#extract, exactly like standard rendering.
+  # exclude_if_nil. Every other field (associations, defaults, datetime formats, custom extractors) calls its closure
+  # from Field#compile, exactly like standard rendering.
   #
-  # The result is only valid while datetime_format, field_default and the global if/unless are unset;
-  # Rendering#prepare_data checks that on every render. Blocks, callables, fields, transformers and unusual names live in
-  # the module's REFS constant and are referenced by index, so user-provided text is never interpolated as code.
+  # The result is only valid while datetime_format, field_default, association_default and the global if/unless are
+  # unset; Rendering#compiled_view checks that on every render. Blocks, callables, field closures, transformers and
+  # unusual names live in the module's REFS constant and are referenced by index, so user-provided text is never
+  # interpolated as code.
   module ViewCompiler
     # Method names that can be called directly as `object.name`
     CALLABLE_METHOD = /\A[a-z_][a-zA-Z0-9_]*[?!]?\z/
@@ -22,10 +23,13 @@ module Blueprinter
     module_function
 
     # @return [Module] responds to `call(object, options)` and returns the object's Hash
-    def compile(fields, transformers)
+    # @param [Array<Field>] fields
+    # @param [Array<Proc>] compiled_fields the view's closures from Field#compile, in the same order as fields
+    # @param [Array<Transformer>] transformers
+    def compile(fields, compiled_fields, transformers)
       refs = []
       ref = ->(value) { "REFS[#{refs.push(value).size - 1}]" }
-      body = body(fields, transformers, ref)
+      body = body(fields, compiled_fields, transformers, ref)
 
       Module.new.tap do |compiled|
         compiled.const_set(:REFS, refs.freeze)
@@ -37,19 +41,19 @@ module Blueprinter
       end
     end
 
-    def body(fields, transformers, ref)
+    def body(fields, compiled_fields, transformers, ref)
       literal = []
       statements = []
       keys = {}
 
-      fields.each do |field|
+      fields.each_with_index do |field, index|
         key = key_for(field.name, ref)
         value = simple_value(field, ref)
         # A repeated name keeps its first position and its last value, like assigning a Hash key twice
         if value && statements.empty? && literal_field?(field, keys)
           literal << "#{key} => #{value}"
         else
-          statements << statement(field, key, value, ref)
+          statements << statement(field, compiled_fields[index], key, value, ref)
         end
         keys[field.name] = true
       end
@@ -119,14 +123,11 @@ module Blueprinter
       blueprint.__send__(:object_to_hash, object, compiled_fields:, transformers:, local_options: options)
     end
 
-    def statement(field, key, value, ref)
-      unless value
-        # Standard rendering for this field
-        field_ref = ref.call(field)
-        value = "#{field_ref}.extract(object, options)"
-        condition = "!#{field_ref}.skip?(#{key}, object, options)"
-      end
-      condition ||= field_conditions(field, key, ref)
+    def statement(field, render_field, key, value, ref)
+      # Standard rendering for this field: the closure checks conditions, extracts, and stores the value
+      return "#{ref.call(render_field)}.call(h, object, options)" unless value
+
+      condition = field_conditions(field, key, ref)
       store = field.options[:exclude_if_nil] ? "v = #{value}\nh[#{key}] = v unless v.nil?" : "h[#{key}] = #{value}"
       condition ? "if #{condition}\n#{store}\nend" : store
     end

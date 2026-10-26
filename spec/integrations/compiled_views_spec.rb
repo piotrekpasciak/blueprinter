@@ -410,4 +410,25 @@ describe 'Compiled views' do
       expect(nil_broken.render_as_hash(user)).to eq(nothing: nil)
     end
   end
+
+it 'stops using the compiled view while a global setting is set, and recompiles once it is cleared' do
+  allow(Blueprinter::ViewCompiler).to receive(:compile).and_call_original
+  Blueprinter.configuration.compile_views = true
+  record = Struct.new(:id, :name).new(1, nil)
+  plain = Class.new(Blueprinter::Base) do
+    identifier :id
+    field :name
+  end
+
+  expect(plain.render_as_hash(record)).to eq(id: 1, name: nil)
+  expect(Blueprinter::ViewCompiler).to have_received(:compile).once
+
+  Blueprinter.configuration.field_default = 'N/A'
+  expect(plain.render_as_hash(record)).to eq(id: 1, name: 'N/A')
+  expect(Blueprinter::ViewCompiler).to have_received(:compile).once
+
+  Blueprinter.configuration.field_default = nil
+  expect(plain.render_as_hash(record)).to eq(id: 1, name: nil)
+  expect(Blueprinter::ViewCompiler).to have_received(:compile).twice
+end
 end

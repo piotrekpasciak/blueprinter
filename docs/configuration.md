@@ -2,7 +2,7 @@
 title: "Configuration Reference"
 type: reference
 description: "Find out what a configuration option does and when changing it takes effect."
-generated: { by: cursor/claude-fable-5.1, at: "2026-10-23T14:00:43Z" }
+generated: { by: claude-code/claude-opus-5-5, at: "2026-10-26T21:10:09Z" }
 verified:
   - { by: human:lessthanjacob, at: "2026-10-21T22:30:20Z" }
 ---
@@ -16,6 +16,7 @@ verified:
 | Option | Default | Read by |
 |---|---|---|
 | `association_default` | `nil` | `AssociationExtractor`, when an association's value is `nil` (or matches `:default_if`) and the association sets no `:default` |
+| `compile_views` | `false` | `Rendering#compiled_view`, on every render. When `true`, and global `datetime_format`, `field_default`, `association_default`, `if`, and `unless` are unset, non-`Hash` objects render through the view's compiled module ([architecture.md](architecture.md#compiled-views)) |
 | `custom_array_like_classes` | `[]` | `Configuration#array_like_classes`, which treats these classes like `Array` when rendering a collection. The writer clears the memoized list |
 | `datetime_format` | `nil` | `Field#compile`, which keeps a field off the plain-field path while a format is set, and `DateTimeFormatter` when a field sets no `:datetime_format`. A `String` is passed to `strftime`, a `Proc` is called, and anything else raises `InvalidDateTimeFormatterError` |
 | `default_transformers` | `[]` | `ViewCollection#build_transformers`, only when a view has no transformers of its own, including inherited and included ones. Any transformer on the blueprint replaces these rather than adding to them |
@@ -33,9 +34,9 @@ verified:
 Surprises come from changing an option after it has already been read:
 
 - Set before any blueprint is defined: `sort_fields_by` and `extractor_default`. Both are read when views and fields are created, so blueprints defined earlier keep the old value. Neither bumps the configuration generation, and a later write does not rebuild existing blueprints. Changing `sort_fields_by` away from `:definition` after a blueprint was defined with it is _worse_ than ignored: views created later in that blueprint drop their own fields, because they no longer track definition order. `extractor_default` is copied onto each field, and each blueprint's `AssociationExtractor` copies the default extractor, when that field or association is defined.
-- Take effect on the next render, because the writer bumps the generation and the next render rebuilds the compiled pipeline: `datetime_format`, `default_transformers`, `field_default`, `if`, and `unless`. Setting `if` or `unless` where none was set moves the affected fields off the plain-field path on that rebuild; a field that has already resolved a condition keeps it.
+- Take effect on the next render, because the writer bumps the generation and the next render rebuilds the compiled pipeline: `datetime_format`, `default_transformers`, `field_default`, `if`, and `unless`. Setting `if` or `unless` where none was set moves plain fields off the plain-field path on that rebuild. Any other field memoizes its condition, or the absence of one, on its first `skip?`, so a field that has already rendered ignores a global `if` or `unless` set later.
 - Takes effect on the next render without bumping the generation: `custom_array_like_classes`. Its writer clears the memoized class list, and no compiled pipeline depends on it.
-- Read on every render, so they take effect immediately: `association_default`, `deprecations`, `extensions`, `generator`, and `method`.
+- Read on every render, so they take effect immediately: `association_default`, `compile_views`, `deprecations`, `extensions`, `generator`, and `method`.
 - `reset_configuration!` installs a fresh `Configuration` and bumps the generation, so the next render rebuilds.
 
 ## Notes

@@ -19,7 +19,7 @@ describe Blueprinter::ViewCompiler do
 
   def generated_body(blueprint)
     collection = blueprint.view_collection
-    described_class.body(collection.fields_for(:default), collection.transformers(:default), ->(_) { 'REFS[0]' })
+    described_class.body(collection.fields_for(:default), *collection.render_pipeline(:default), ->(_) { 'REFS[0]' })
   end
 
   it 'compiles plain fields into a Hash literal with direct method calls' do

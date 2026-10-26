@@ -737,6 +737,25 @@ describe '::Base' do
       expect(blueprint.render_as_hash(object)).to eq({})
     end
 
+# Documents current behaviour, not a goal: Field memoizes its resolved :if/:unless (#608), including "none", the
+# first time skip? runs. A field off the plain-field path has already run skip?, so a global :if set later is
+# ignored for it, while plain fields pick it up when the pipeline is rebuilt. Compiled views write this field
+# inline without calling skip?, so the standard path is pinned here.
+it 'ignores a global :if set after the first render for a field that already resolved its conditions' do
+  Blueprinter.configuration.compile_views = false
+  conditioned = Class.new(Blueprinter::Base) do
+    identifier :id
+    field :first_name, exclude_if_nil: true
+  end
+  object = OpenStruct.new(id: 1, first_name: 'Meg')
+
+  expect(conditioned.render_as_hash(object)).to eq(id: 1, first_name: 'Meg')
+
+  Blueprinter.configure { |config| config.if = ->(_name, _object, _opts) { false } }
+
+  expect(conditioned.render_as_hash(object)).to eq(first_name: 'Meg')
+end
+
     it 'uses one coherent pipeline when configuration changes after lookup' do
       transformer = Class.new(Blueprinter::Transformer) do
         def self.transform(hash, _object, _options)

@@ -89,7 +89,7 @@ module Blueprinter
     # @return [Module]
     def compiled(view_name)
       cache = ensure_cached!
-      cache[:compiled][view_name] ||= ViewCompiler.compile(cache[:fields][view_name], cache[:transformers][view_name])
+      cache[:compiled][view_name] ||= ViewCompiler.compile(cache[:fields][view_name], *cache[:pipelines][view_name])
     end
 
     # @param [String] view_name

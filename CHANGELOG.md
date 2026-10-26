@@ -1,6 +1,7 @@
 ## Unreleased
 - 💅 [ENHANCEMENT] Marks `Transformer`, `AutoExtractor`, and the `AutoExtractor#extractor` override hook as public API, matching the README's subclassing docs. See [#612](https://github.com/procore-oss/blueprinter/pull/612). Thanks to [@lessthanjacob](https://github.com/lessthanjacob).
-- 🚀 [FEATURE] Adds opt-in compiled views (`config.compile_views = true`), which compile each view into a plain Ruby method on first render. Output is identical to standard rendering, and rendering is several times faster.
+- 🚀 [FEATURE] Adds opt-in compiled views (`config.compile_views = true`), which compile each view into a plain Ruby method on first render. Output is identical to standard rendering, and rendering is several times faster; see the README's "Compiled Views" section for caveats. See [#613](https://github.com/procore-oss/blueprinter/pull/613).
+- 💅 [ENHANCEMENT] Compiles each field into a cached render closure, so plain fields skip the extractor dispatch and rendering is about 2-4x faster by default. `datetime_format`, `field_default`, and `default_transformers` set after a blueprint's first render now take effect on its next render, as does a global `if` / `unless` for fields without conditions, blocks, datetime formats, defaults, or `exclude_if_nil`. See [#615](https://github.com/procore-oss/blueprinter/pull/615). Thanks to [@Hamdy](https://github.com/Hamdy).
 
 ## 1.3.0 - 2026/04/14
 - 🚀 [FEATURE] Adds support for `Symbol#to_proc` syntax in fields and identifiers. See [#546](https://github.com/procore-oss/blueprinter/pull/546). Thanks to [@tob1k](https://github.com/tob1k).
