@@ -62,11 +62,12 @@ module Blueprinter
     end
 
     # @api private
-    # Whether renders can use compiled views (see ViewCompiler): compile_views is on and none of the global settings that
-    # compiled views don't handle is set.
-    def views_compilable?
-      compile_views && datetime_format.nil? && field_default.nil? && association_default.nil? &&
-        self.if.nil? && self.unless.nil?
+    # Whether renders can use compiled views (see ViewCompiler): the render's compile_views option (`local_compile_views`)
+    # is on, or it is nil and the global compile_views is on, and none of the global settings that compiled views don't
+    # handle is set.
+    def views_compilable?(local_compile_views = nil)
+      (local_compile_views.nil? ? compile_views : local_compile_views) && datetime_format.nil? && field_default.nil? &&
+        association_default.nil? && self.if.nil? && self.unless.nil?
     end
 
     # @param extractor [Class<Blueprinter::AutoExtractor>]

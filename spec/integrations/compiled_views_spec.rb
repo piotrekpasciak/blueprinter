@@ -29,27 +29,38 @@ describe 'Compiled views' do
     end
   end
 
-  def render_with(compile_views, blueprint, object, options)
-    Blueprinter.configuration.compile_views = compile_views
+  def compiled_cache(blueprint)
+    blueprint.view_collection.compiled_views
+  end
+
+  # mode: :standard, :global (config.compile_views) or :local (the compile_views: render option)
+  def render_with(mode, blueprint, object, options)
+    Blueprinter.configuration.compile_views = mode == :global
+    options = options.merge(compile_views: true) if mode == :local
     extension_log.clear
     hash = blueprint.render_as_hash(object, options)
     json = blueprint.render(object, options)
-    [hash, json, extension_log.dup]
+    # The render option is visible to extensions; leave it out so the logs compare equal
+    log = extension_log.map { |entry| entry.dup.tap { |e| e[3] = e[3] - [:compile_views] } }
+    [hash, json, log]
   end
 
   def expect_same_output(blueprint, object, options = {})
-    standard = render_with(false, blueprint, object, options)
-    compiled = render_with(true, blueprint, object, options)
+    standard = render_with(:standard, blueprint, object, options)
 
-    expect(compiled[0]).to eq(standard[0])
-    expect(key_orders(compiled[0])).to eq(key_orders(standard[0]))
-    expect(compiled[1]).to eq(standard[1])
-    expect(compiled[2]).to eq(standard[2])
-    # Compiled views are skipped while these global settings are set
-    config = Blueprinter.configuration
-    return unless [config.datetime_format, config.field_default, config.association_default, config.if, config.unless].all?(&:nil?)
+    %i[local global].each do |mode|
+      compiled = render_with(mode, blueprint, object, options)
 
-    expect(blueprint.send(:view_collection).instance_variable_get(:@cache)[:compiled]).not_to be_empty
+      expect(compiled[0]).to eq(standard[0])
+      expect(key_orders(compiled[0])).to eq(key_orders(standard[0]))
+      expect(compiled[1]).to eq(standard[1])
+      expect(compiled[2]).to eq(standard[2])
+      # Compiled views are skipped while these global settings are set
+      config = Blueprinter.configuration
+      next unless [config.datetime_format, config.field_default, config.association_default, config.if, config.unless].all?(&:nil?)
+
+      expect(compiled_cache(blueprint)).not_to be_empty
+    end
   end
 
   let(:user) { create(:user, vehicles: [create(:vehicle, :with_model), create(:vehicle, miles: 10)]) }
@@ -428,6 +439,46 @@ describe 'Compiled views' do
     end
 
     include_examples 'the same output', [{}]
+  end
+
+  context 'with the compile_views render option' do
+    let(:blueprint) do
+      vehicles = vehicle_blueprint
+      Class.new(Blueprinter::Base) do
+        identifier :id
+        field(:render_options) { |_user, **options| options.keys.sort }
+        association :vehicles, blueprint: vehicles
+      end
+    end
+
+    before { Blueprinter.configuration.compile_views = false }
+
+    it 'renders the standard way when the option is not passed' do
+      blueprint.render_as_hash(user)
+
+      expect(compiled_cache(blueprint)).to be_empty
+      expect(compiled_cache(vehicle_blueprint)).to be_empty
+    end
+
+    it 'compiles the rendered view and the views of its associations' do
+      blueprint.render_as_hash(user, compile_views: true)
+
+      expect(compiled_cache(blueprint).keys).to eq([:default])
+      expect(compiled_cache(vehicle_blueprint).keys).to eq([:default])
+    end
+
+    it 'passes the option to fields like any other render option' do
+      expect(blueprint.render_as_hash(user, compile_views: true)[:render_options]).to eq(%i[compile_views view])
+    end
+
+    it 'opts a render and its associations out while compile_views is configured' do
+      Blueprinter.configuration.compile_views = true
+      standard = blueprint.render_as_hash(user, compile_views: false)
+
+      expect(compiled_cache(blueprint)).to be_empty
+      expect(compiled_cache(vehicle_blueprint)).to be_empty
+      expect(blueprint.render_as_hash(user, compile_views: true)).to eq(standard)
+    end
   end
 
   it 'raises the same error for an unknown association view' do

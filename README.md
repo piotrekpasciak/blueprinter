@@ -1166,6 +1166,17 @@ Blueprinter.configure do |config|
 end
 ```
 
+To roll it out gradually, opt in one render at a time instead:
+
+```ruby
+UserBlueprint.render(user, compile_views: true)
+UserBlueprint.render_as_hash(users, view: :extended, compile_views: true)
+```
+
+The option overrides `config.compile_views` for the whole render, associations included, so once compiled views are on
+globally, `compile_views: false` opts a render out. Like any other render option, it is passed to field blocks,
+conditions, transformers and extensions.
+
 A compiled view builds each object's Hash directly, much like a hand-written serializer would:
 
 ```ruby

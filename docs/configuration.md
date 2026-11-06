@@ -2,7 +2,7 @@
 title: "Configuration Reference"
 type: reference
 description: "Find out what a configuration option does and when changing it takes effect."
-generated: { by: claude-code/claude-opus-5-5, at: "2026-10-21T22:02:01Z" }
+generated: { by: claude-code/claude-opus-5-5, at: "2026-11-06T15:35:19Z" }
 verified:
   - { by: human:lessthanjacob, at: "2026-10-21T22:30:20Z" }
 ---
@@ -16,6 +16,7 @@ verified:
 | Option | Default | Read by |
 |---|---|---|
 | `association_default` | `nil` | `AssociationExtractor`, when an association's value is `nil` (or matches `:default_if`) and the association sets no `:default` |
+| `compile_views` | `false` | `Configuration#views_compilable?`, on every render. Renders use compiled views when this is true, unless `datetime_format`, `field_default`, `association_default`, `if` or `unless` is set. A `compile_views:` render option of `true` or `false` overrides it for that render and its associations; the settings listed still force standard rendering |
 | `custom_array_like_classes` | `[]` | `Configuration#array_like_classes`, which treats these classes like `Array` when rendering a collection |
 | `datetime_format` | `nil` | `DateTimeFormatter`, when a field sets no `:datetime_format`. A `String` is passed to `strftime`, a `Proc` is called, and anything else raises `InvalidDateTimeFormatterError` |
 | `default_transformers` | `[]` | `ViewCollection#build_transformers`, only when a view has no transformers of its own, including inherited and included ones. Any transformer on the blueprint replaces these rather than adding to them |
@@ -36,7 +37,7 @@ Surprises come from changing an option after it has already been read:
 - Set before the first render: `custom_array_like_classes`. `Configuration#array_like_classes` memoizes the full list on first use, and only `reset_configuration!` clears it.
 - `if` and `unless`: a field looks up the global condition on every check until it finds one, then keeps it. Setting a condition where none was set takes effect at the next render; changing one after a field has used it is ignored for that field.
 - Takes effect at the next compile: `default_transformers`.
-- Takes effect at the next render: `association_default`, `field_default`, `datetime_format`, `deprecations`, `extensions`, `generator`, and `method`.
+- Takes effect at the next render: `association_default`, `compile_views`, `field_default`, `datetime_format`, `deprecations`, `extensions`, `generator`, and `method`.
 
 ## Notes
 
