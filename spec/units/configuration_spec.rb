@@ -126,6 +126,31 @@ describe 'Blueprinter::Configuration' do
       expect(Blueprinter.configuration.views_compilable?).to be_falsey
     end
 
+    it 'is true when compile_views is off but the render requests it' do
+      Blueprinter.configure { |config| config.compile_views = false }
+
+      expect(Blueprinter.configuration.views_compilable?(true)).to be(true)
+    end
+
+    it 'is false when compile_views is off and the render does not request it' do
+      Blueprinter.configure { |config| config.compile_views = false }
+
+      expect(Blueprinter.configuration.views_compilable?(nil)).to be_falsey
+      expect(Blueprinter.configuration.views_compilable?(false)).to be_falsey
+    end
+
+    it 'is false when compile_views is on but the render opts out' do
+      Blueprinter.configure { |config| config.compile_views = true }
+
+      expect(Blueprinter.configuration.views_compilable?(false)).to be(false)
+    end
+
+    it 'follows compile_views when the render does not choose' do
+      Blueprinter.configure { |config| config.compile_views = true }
+
+      expect(Blueprinter.configuration.views_compilable?(nil)).to be(true)
+    end
+
     {
       datetime_format: '%Y-%m-%d',
       field_default: 'N/A',
@@ -140,6 +165,12 @@ describe 'Blueprinter::Configuration' do
         end
 
         expect(Blueprinter.configuration.views_compilable?).to be(false)
+      end
+
+      it "is false when the global #{setting} is set, even if the render requests compiled views" do
+        Blueprinter.configure { |config| config.public_send(:"#{setting}=", value) }
+
+        expect(Blueprinter.configuration.views_compilable?(true)).to be(false)
       end
     end
   end

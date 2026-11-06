@@ -85,6 +85,12 @@ module Blueprinter
       cache[:compiled][view_name] || compile_view(cache, view_name)
     end
 
+    # The views compiled so far (see #compiled), keyed by view name. Compiles nothing.
+    # @return [Hash{Symbol => Module}]
+    def compiled_views
+      @cache&.fetch(:compiled) || {}.freeze
+    end
+
     # @param [String] view_name
     # @return [View]
     def [](view_name)

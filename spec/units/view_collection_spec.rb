@@ -282,4 +282,25 @@ describe 'ViewCollection' do
       expect(cache).to be_nil
     end
   end
+
+  describe '#compiled_views' do
+    it 'is empty before anything is compiled, and compiles nothing' do
+      allow(Blueprinter::ViewCompiler).to receive(:compile)
+
+      expect(view_collection.compiled_views).to be_empty
+      view_collection.fields_for(:view)
+      expect(view_collection.compiled_views).to be_empty
+      expect(Blueprinter::ViewCompiler).not_to have_received(:compile)
+    end
+
+    it 'returns the views compiled so far' do
+      compiled = Module.new
+      allow(Blueprinter::ViewCompiler).to receive(:compile).and_return(compiled)
+
+      view_collection.compiled(:view)
+
+      expect(view_collection.compiled_views).to eq(view: compiled)
+      expect(view_collection.compiled_views).to be_frozen
+    end
+  end
 end

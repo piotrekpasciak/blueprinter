@@ -23,6 +23,10 @@ module Blueprinter
     # @option options [Any] :meta Defaults to nil.
     #   Render the json/hash with a meta attribute with provided value
     #   if both root and meta keys are provided in the options hash.
+    # @option options [Boolean] :compile_views Defaults to nil.
+    #   Render with (true) or without (false) compiled views, associations
+    #   included, overriding config.compile_views. It stays in the options
+    #   fields receive.
     #
     # @example Generating JSON with an extended view
     #   post = Post.all
@@ -48,6 +52,10 @@ module Blueprinter
     # @option options [Any] :meta Defaults to nil.
     #   Render the json/hash with a meta attribute with provided value
     #   if both root and meta keys are provided in the options hash.
+    # @option options [Boolean] :compile_views Defaults to nil.
+    #   Render with (true) or without (false) compiled views, associations
+    #   included, overriding config.compile_views. It stays in the options
+    #   fields receive.
     #
     # @example Generating a hash with an extended view
     #   post = Post.all
@@ -73,6 +81,10 @@ module Blueprinter
     # @option options [Any] :meta Defaults to nil.
     #   Render the json/hash with a meta attribute with provided value
     #   if both root and meta keys are provided in the options hash.
+    # @option options [Boolean] :compile_views Defaults to nil.
+    #   Render with (true) or without (false) compiled views, associations
+    #   included, overriding config.compile_views. It stays in the options
+    #   fields receive.
     #
     # @example Generating a hash with an extended view
     #   post = Post.all
@@ -126,7 +138,7 @@ module Blueprinter
       # Since we're currently providing the current view in the local_options hash when we extract fields, we can merge
       # it in ahead of time to avoid allocating a new hash for every field extraction.
       local_options_with_view = local_options.merge(view: view_name)
-      compiled = compiled_view(view_name)
+      compiled = compiled_view(view_name, local_options)
 
       if array_like?(object)
         object.map do |obj|
@@ -146,9 +158,10 @@ module Blueprinter
       object_to_hash(object, view_name:, local_options:)
     end
 
-    # The compiled view (see ViewCompiler), or nil when Configuration#views_compilable? is false
-    def compiled_view(view_name)
-      view_collection.compiled(view_name) if Blueprinter.configuration.views_compilable?
+    # The compiled view (see ViewCompiler), or nil when Configuration#views_compilable? is false for this render. The
+    # :compile_views render option stays in local_options, so associations rendered from here follow it too.
+    def compiled_view(view_name, local_options)
+      view_collection.compiled(view_name) if Blueprinter.configuration.views_compilable?(local_options[:compile_views])
     end
 
     def object_to_hash(object, view_name:, local_options:)
