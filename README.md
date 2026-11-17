@@ -1157,15 +1157,7 @@ Gems can be created that enrich `blueprinter`'s core functionality via extension
 <summary>Compiled Views</summary>
 
 
-Blueprinter can compile each view into a plain Ruby method on first render, which can improve rendering performance.
-Output is identical to standard rendering. It is opt-in:
-
-```ruby
-Blueprinter.configure do |config|
-  config.compile_views = true
-end
-```
-
+Blueprinter compiles each view into a plain Ruby method on first render, which can improve rendering performance.
 A compiled view builds each object's Hash directly, much like a hand-written serializer would:
 
 ```ruby
@@ -1180,16 +1172,16 @@ A compiled view builds each object's Hash directly, much like a hand-written ser
 
 Fields, blocks, `name`, `if`/`unless` and `exclude_if_nil` are compiled, as are associations with a fixed
 `:blueprint` (extensions still run for them). Everything else (`default`, `default_if`, `datetime_format`, custom
-extractors, associations with a Proc `:blueprint` or `:options`, and any other option) uses standard rendering within
-the compiled view.
+extractors, associations with a Proc `:blueprint` or `:options`, and any other option) is read through the field's
+extractor within the compiled view.
 
 How much it helps depends on the blueprint and the objects: views made mostly of compiled fields gain the most, fields
-that use standard rendering gain little, and the cost of reading values from the objects themselves (for example
+read through their extractor gain little, and the cost of reading values from the objects themselves (for example
 ActiveRecord attributes or queries they trigger) is unchanged.
 
 Things to know:
-- While `datetime_format`, `field_default`, `association_default`, `if` or `unless` is set in the global configuration,
-  renders use standard rendering. Hash objects are also always rendered the standard way.
+- Set `datetime_format`, `field_default` and `association_default` before the first render, e.g. in an initializer.
+  Each view is compiled with the configuration as it is at its first render. Hash objects are read by key (`object[:name]`).
 - Compiled views are stored with Blueprinter's view cache and rebuilt whenever it is refreshed (e.g. after a `view`
   block).
 - Compiled fields read values directly (`object.name`), so patches applied directly to Blueprinter's internal

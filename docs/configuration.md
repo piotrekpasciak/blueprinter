@@ -2,7 +2,7 @@
 title: "Configuration Reference"
 type: reference
 description: "Find out what a configuration option does and when changing it takes effect."
-generated: { by: claude-code/claude-opus-5-5, at: "2026-10-21T22:02:01Z" }
+generated: { by: claude-code/claude-opus-5-5, at: "2026-11-17T17:05:42Z" }
 verified:
   - { by: human:lessthanjacob, at: "2026-10-21T22:30:20Z" }
 ---
@@ -34,9 +34,10 @@ Surprises come from changing an option after it has already been read:
 
 - Set before any blueprint is defined: `sort_fields_by` and `extractor_default`. Both are read when views and fields are created, so blueprints defined earlier keep the old value. Changing `sort_fields_by` away from `:definition` after a blueprint was defined with it is _worse_ than ignored: views created later in that blueprint drop their own fields, because they no longer track definition order.
 - Set before the first render: `custom_array_like_classes`. `Configuration#array_like_classes` memoizes the full list on first use, and only `reset_configuration!` clears it.
+- Set before a blueprint's first render: `association_default`, `field_default`, and `datetime_format`. Each view is compiled on its first render (`ViewCompiler`), with the formatting and default steps these settings call for at that moment, so a view ignores a setting assigned after it was compiled.
 - `if` and `unless`: a field looks up the global condition on every check until it finds one, then keeps it. Setting a condition where none was set takes effect at the next render; changing one after a field has used it is ignored for that field.
 - Takes effect at the next compile: `default_transformers`.
-- Takes effect at the next render: `association_default`, `field_default`, `datetime_format`, `deprecations`, `extensions`, `generator`, and `method`.
+- Takes effect at the next render: `deprecations`, `extensions`, `generator`, and `method`.
 
 ## Notes
 

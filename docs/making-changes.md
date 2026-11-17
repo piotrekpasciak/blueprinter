@@ -2,7 +2,7 @@
 title: "Making Changes"
 type: how-to
 description: "Take a change from idea to mergeable PR: what every PR needs, and where each kind of change belongs in the code."
-generated: { by: cursor/claude-fable-5.1, at: "2026-10-27T21:01:11Z" }
+generated: { by: claude-code/claude-opus-5-5, at: "2026-11-17T15:39:34Z" }
 verified:
   - { by: human:lessthanjacob, at: "2026-10-29T13:16:45Z" }
 ---
@@ -39,11 +39,11 @@ Blueprinter does its work in three **phases** (definition, compilation, and rend
 
 ## Add a Field or Association Option
 
-A field stores _every_ option it's given and hands the whole hash to its extractor on each render, so adding an option is mostly a question of where to read it. `:exclude_if_nil`, for example, is read in `Rendering#object_to_hash`, right after extraction:
+A field stores _every_ option it's given and hands the whole hash to its extractor on each render, so adding an option is mostly a question of where to read it. A field with an option outside `ViewCompiler::COMPILABLE_OPTIONS` is always read with `Field#extract`, so a new option read by an extractor needs no compiler change. `:exclude_if_nil`, for example, is read in `ViewCompiler#statement`, which guards the store on the extracted value:
 
 ```ruby
-value = field.extract(object, local_options)
-next if value.nil? && field.options[:exclude_if_nil]
+v = REFS[0].extract(object, options)
+h[:name] = v unless v.nil?
 ```
 
 1. Pick where to read it using [Where a Change Belongs](#where-a-change-belongs). Other models: `:default_if` is read in the extractors, and `:if` / `:unless` in `Field#skip?`.
