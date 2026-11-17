@@ -6,10 +6,7 @@ describe Blueprinter::ViewCompiler do
   let(:item_class) { Struct.new(:id, :name, :status, :child, keyword_init: true) }
   let(:item) { item_class.new(id: 1, name: 'Leak', status: 'open') }
 
-  before do
-    reset_blueprinter_config!
-    Blueprinter.configuration.compile_views = true
-  end
+  before { reset_blueprinter_config! }
 
   after { reset_blueprinter_config! }
 
@@ -17,10 +14,10 @@ describe Blueprinter::ViewCompiler do
     Class.new(Blueprinter::Base, &body)
   end
 
-  def generated_body(blueprint)
+  def generated_body(blueprint, hash: false)
     collection = blueprint.view_collection
     described_class.body(fields: collection.fields_for(:default), transformers: collection.transformers(:default),
-                         ref: ->(_) { 'REFS[0]' })
+                         ref: ->(_) { 'REFS[0]' }, hash:)
   end
 
   it 'compiles plain fields into a Hash literal with direct method calls' do
@@ -31,6 +28,17 @@ describe Blueprinter::ViewCompiler do
 
     expect(generated_body(plain)).to eq('{ :id => object.id, :name => object.name, :status => object.status }')
     expect(plain.render_as_hash(item)).to eq(id: 1, name: 'Leak', status: 'open')
+  end
+
+  it 'reads a Hash by key, like HashExtractor' do
+    renamed = blueprint do
+      identifier :id
+      field :status, name: :state
+    end
+
+    expect(generated_body(renamed, hash: true)).to eq('{ :id => object[:id], :state => object[:status] }')
+    expect(renamed.render_as_hash([{ id: 1, status: 'open' },
+                                   item])).to eq([{ id: 1, state: 'open' }, { id: 1, state: 'open' }])
   end
 
   it "compiles simple associations into a call to the associated Blueprint's hashify" do

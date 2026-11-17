@@ -26,6 +26,10 @@ Metrics/ClassLength:
   Exclude:
     - 'lib/blueprinter/view_collection.rb'
 
+Metrics/ModuleLength:
+  Exclude:
+    - 'lib/blueprinter/view_compiler.rb'
+
 Metrics/AbcSize:
   Enabled: false
 

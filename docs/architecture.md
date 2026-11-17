@@ -2,7 +2,7 @@
 title: "Architecture"
 type: explanation
 description: "Build a working model of how a blueprint is defined, compiled, and rendered, and why each mechanism has its shape."
-generated: { by: claude-code/claude-opus-5-5, at: "2026-11-05T14:00:41Z" }
+generated: { by: claude-code/claude-opus-5-5, at: "2026-11-17T15:39:34Z" }
 verified:
   - { by: human:lessthanjacob, at: "2026-10-21T23:24:23Z" }
 ---
@@ -123,7 +123,7 @@ sequenceDiagram
 
 ### Render Performance
 
-Rendering runs once per field per object, so its cost grows with the size of the output. The **render hot path** is `Rendering#object_to_hash`, `Field#extract`, `Field#skip?`, `AutoExtractor#extract`, and `AssociationExtractor#extract`, which run once per field per object.
+Rendering runs once per field per object, so its cost grows with the size of the output. The **render hot path** is the code `ViewCompiler` generates, `Field#extract`, `Field#skip?`, `AutoExtractor#extract`, and `AssociationExtractor#extract`, which run once per field per object.
 
 Changes to these methods follow three rules:
 
@@ -243,7 +243,7 @@ Blueprinter loads in two ways for two reasons. **Autoloading** lets an app refer
 A blueprint class is shared by every thread in a multi-threaded server, so anything it caches has to be safe to read concurrently.
 
 - The only lock under `lib/` is the `Mutex` in `ViewCollection`. `ensure_cached!` checks for the snapshot without the lock, builds it under the lock with a second check, and publishes it with one reference assignment, so renders after the first take _no_ lock.
-- With `compile_views` on, `ViewCollection#compiled` adds each compiled view the same way: it looks the view up without the lock, compiles it under the lock with a second check, and publishes a _new_ frozen snapshot that includes it. A published snapshot is never written to, because JRuby needs external synchronization for a `Hash` write that overlaps another thread's read or write, including two threads compiling different views. A compile whose snapshot was invalidated meanwhile returns its module without storing it; publishing a compiled view keeps the snapshot's `fields` `Hash`, so only a rebuild counts as invalidation.
+- `ViewCollection#compiled` adds each compiled view the same way: it looks the view up without the lock, compiles it under the lock with a second check, and publishes a _new_ frozen snapshot that includes it. A published snapshot is never written to, because JRuby needs external synchronization for a `Hash` write that overlaps another thread's read or write, including two threads compiling different views. A compile whose snapshot was invalidated meanwhile returns its module without storing it; publishing a compiled view keeps the snapshot's `fields` `Hash`, so only a rebuild counts as invalidation.
 - The snapshot's `Hash`es and `Array`s are frozen; the `Field` and transformer objects inside them are not.
 - The DSL is unsynchronized and assumes class bodies run before concurrent renders start.
 - Not safe: DSL calls that invalidate while other threads render. `fields_for` reads the snapshot reference twice and `invalidate_cache!` writes it without the lock.

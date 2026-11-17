@@ -1,69 +1,22 @@
 # frozen_string_literal: true
 
-require 'activerecord_helper'
+require 'date'
 
-# Renders the same blueprints with compile_views off and on and checks that the output is identical.
+# Covers what ViewCompiler generates code for: direct reads, Hash reads, conditions, exclude_if_nil, associations,
+# global settings, and the fields it reads with Field#extract instead.
 describe 'Compiled views' do
-  include FactoryBot::Syntax::Methods
-
   before { reset_blueprinter_config! }
   after { reset_blueprinter_config! }
 
-  # Records every pre_render call so both modes can be compared
-  let(:extension_log) { [] }
-  let(:logging_extension) do
-    log = extension_log
-    Class.new(Blueprinter::Extension) do
-      define_method(:pre_render) do |object, blueprint, view, options|
-        log << [object.class.name, blueprint, view, options.keys.sort]
-        object
-      end
-    end.new
+  let(:vehicle_class) { Struct.new(:id, :make, :model, :miles, keyword_init: true) }
+  let(:user_class) do
+    Struct.new(:id, :first_name, :last_name, :company, :birthday, :deleted_at, :vehicles, keyword_init: true)
   end
-
-  def key_orders(result)
-    case result
-    when Array then result.map { |item| key_orders(item) }
-    when Hash then result.map { |key, value| [key, key_orders(value)] }
-    else result
-    end
+  let(:vehicles) { [vehicle_class.new(id: 10, make: 'Super Car', model: 'ACME', miles: 5), vehicle_class.new(id: 11)] }
+  let(:user) do
+    user_class.new(id: 1, first_name: 'Meg', last_name: 'Ryan', company: 'Procore', birthday: Date.new(1994, 3, 4),
+                   vehicles:)
   end
-
-  def render_with(compile_views, blueprint, object, options)
-    Blueprinter.configuration.compile_views = compile_views
-    extension_log.clear
-    hash = blueprint.render_as_hash(object, options)
-    json = blueprint.render(object, options)
-    [hash, json, extension_log.dup]
-  end
-
-  def expect_same_output(blueprint, object, options = {})
-    standard = render_with(false, blueprint, object, options)
-    compiled = render_with(true, blueprint, object, options)
-
-    expect(compiled[0]).to eq(standard[0])
-    expect(key_orders(compiled[0])).to eq(key_orders(standard[0]))
-    expect(compiled[1]).to eq(standard[1])
-    expect(compiled[2]).to eq(standard[2])
-    # Compiled views are skipped while these global settings are set
-    config = Blueprinter.configuration
-    return unless [config.datetime_format, config.field_default, config.association_default, config.if, config.unless].all?(&:nil?)
-
-    expect(blueprint.send(:view_collection).instance_variable_get(:@cache)[:compiled]).not_to be_empty
-  end
-
-  let(:user) { create(:user, vehicles: [create(:vehicle, :with_model), create(:vehicle, miles: 10)]) }
-  let(:user_without_vehicles) { create(:user, first_name: '', last_name: nil) }
-  let(:objects) do
-    {
-      'a record' => user,
-      'a record without associations' => user_without_vehicles,
-      'an Array' => [user, user_without_vehicles],
-      'an ActiveRecord::Relation' => User.where(id: [user.id, user_without_vehicles.id]).order(:id),
-      'an empty Array' => []
-    }
-  end
-
   let(:vehicle_blueprint) do
     Class.new(Blueprinter::Base) do
       identifier :id
@@ -76,371 +29,293 @@ describe 'Compiled views' do
     end
   end
 
-  shared_examples 'the same output' do |option_sets|
-    option_sets.each do |options|
-      it "renders the same output with options #{options.inspect}", :aggregate_failures do
-        objects.each_value { |object| expect_same_output(blueprint, object, options) }
-      end
-    end
+  def render(blueprint, object = user, **options)
+    blueprint.render_as_hash(object, **options)
   end
 
-  context 'with fields and views' do
-    let(:blueprint) do
-      Class.new(Blueprinter::Base) do
-        identifier :id
-        fields :first_name, :last_name
-        field :position, name: :job_title
+  it 'renders fields and views in the order the view defines them' do
+    blueprint = Class.new(Blueprinter::Base) do
+      identifier :id
+      fields :last_name, :first_name
+      field :company, name: :employer
 
-        view :normal do
-          fields :company, :description
-        end
-
-        view :extended do
-          include_view :normal
-          exclude :last_name
-          field :birthday
-        end
+      view :extended do
+        exclude :last_name
+        field :birthday
       end
     end
 
-    include_examples 'the same output', [{}, { view: :normal }, { view: :extended }, { view: :identifier },
-                                         { view: :extended, root: :user, meta: { page: 1 } }]
+    expect(render(blueprint).to_a).to eq([[:id, 1], [:employer, 'Procore'], [:first_name, 'Meg'], [:last_name, 'Ryan']])
+    expect(render(blueprint, view: :extended).to_a)
+      .to eq([[:id, 1], [:birthday, Date.new(1994, 3, 4)], [:employer, 'Procore'], [:first_name, 'Meg']])
+    expect(render(blueprint, view: :identifier)).to eq(id: 1)
+    expect(render(blueprint, [user, user_class.new(id: 2)], view: :identifier)).to eq([{ id: 1 }, { id: 2 }])
+    expect(render(blueprint, [])).to eq([])
   end
 
-  context 'with conditions and exclude_if_nil' do
-    let(:blueprint) do
-      Class.new(Blueprinter::Base) do
-        identifier :id
-        field :first_name, if: ->(_name, user, _options) { user.first_name.present? }
-        field :last_name, exclude_if_nil: true
-        field :company, unless: ->(_name, _user, options) { options[:hide_company] }
-        field :position, if: :show_position?
-        field :description, if: ->(*) { true }, unless: :hide_description?
-
-        def self.show_position?(_name, _user, options) = options[:show_position]
-        def self.hide_description?(name, _user, options) = options[:hidden]&.include?(name)
-      end
+  it 'reads Hash objects by key, including in a collection mixed with other objects' do
+    blueprint = Class.new(Blueprinter::Base) do
+      identifier :id
+      field :first_name, name: :name
+      field :'kebab-name', name: :'Kebab Name'
     end
+    kebab = Struct.new(:id, :first_name, :'kebab-name')
 
-    include_examples 'the same output', [{}, { hide_company: true }, { show_position: true, hidden: [:description] }]
+    expect(render(blueprint, { id: 1, first_name: 'Meg', 'kebab-name': 'k' }))
+      .to eq(id: 1, name: 'Meg', 'Kebab Name': 'k')
+    expect(render(blueprint, [{ id: 1, first_name: 'Meg' }, kebab.new(2, 'Ann', 'x')]))
+      .to eq([{ id: 1, name: 'Meg', 'Kebab Name': nil }, { id: 2, name: 'Ann', 'Kebab Name': 'x' }])
   end
 
-  context 'with blocks' do
-    let(:blueprint) do
-      Class.new(Blueprinter::Base) do
-        identifier :id
-        field(:full_name) { |user, options| "#{options[:prefix]}#{user.first_name} #{user.last_name}" }
-        field :upcased_name, &->(user, _options) { user.first_name.to_s.upcase }
-        field :first_name, name: :symbol_proc, &:first_name
-        field(:keywords) { |user, view:, **| "#{user.id}@#{view}" }
-      end
+  it 'applies if, unless and exclude_if_nil' do
+    blueprint = Class.new(Blueprinter::Base) do
+      identifier :id
+      field :first_name, if: ->(_name, user, _options) { user.first_name }
+      field :last_name, exclude_if_nil: true
+      field :company, unless: ->(_name, _user, options) { options[:hide_company] }
+      field :birthday, if: :show_birthday?
+      field :deleted_at, if: ->(*) { true }, unless: :hidden?
+
+      def self.show_birthday?(_name, _user, options) = options[:show_birthday]
+      def self.hidden?(name, _user, options) = options[:hidden]&.include?(name)
     end
 
-    include_examples 'the same output', [{}, { prefix: 'Dr. ' }]
+    expect(render(blueprint)).to eq(id: 1, first_name: 'Meg', last_name: 'Ryan', company: 'Procore', deleted_at: nil)
+    expect(render(blueprint, user_class.new(id: 2), hide_company: true, show_birthday: true, hidden: [:deleted_at]))
+      .to eq(id: 2, birthday: nil)
   end
 
-  context 'with defaults' do
-    let(:blueprint) do
-      Class.new(Blueprinter::Base) do
-        identifier :id
-        field :last_name, default: 'N/A'
-        field :first_name, default: 'blank', default_if: Blueprinter::EMPTY_STRING
-        field :missing_hash, default: { a: 1 }, default_if: Blueprinter::EMPTY_HASH do |_user, _options|
-          {}
-        end
-        field :missing_list, default: [0], default_if: Blueprinter::EMPTY_COLLECTION do |_user, _options|
-          []
-        end
-        field :unknown_empty_type, default: 'never', default_if: 'not_a_type' do |_user, _options|
-          nil
-        end
-        association :vehicles, blueprint: Class.new(Blueprinter::Base) { identifier :id },
-                               default: 'no vehicles', default_if: Blueprinter::EMPTY_COLLECTION
-      end
+  it 'applies the global if and unless' do
+    Blueprinter.configure do |config|
+      config.if = ->(name, _object, options) { !options[:skip]&.include?(name) }
+      config.unless = ->(name, _object, _options) { name == :company }
+    end
+    blueprint = Class.new(Blueprinter::Base) do
+      identifier :id
+      fields :first_name, :last_name, :company
+      field :birthday, if: ->(*) { false }
     end
 
-    include_examples 'the same output', [{}]
-
-    context 'when field_default is configured' do
-      before { Blueprinter.configure { |config| config.field_default = 'field default' } }
-
-      let(:blueprint) do
-        Class.new(Blueprinter::Base) do
-          identifier :id
-          fields :last_name, :deleted_at
-          association :vehicles, blueprint: Class.new(Blueprinter::Base) { identifier :id }, default_if: Blueprinter::EMPTY_COLLECTION
-        end
-      end
-
-      include_examples 'the same output', [{}]
-
-      it 'applies it to nil association values too, in both modes' do
-        nil_association = Class.new(Blueprinter::Base) do
-          association :nothing, blueprint: Class.new(Blueprinter::Base) { identifier :id } do |_user, _options|
-            nil
-          end
-        end
-
-        [false, true].each do |compile_views|
-          Blueprinter.configuration.compile_views = compile_views
-          expect { nil_association.render_as_hash(user) }.to raise_error(NoMethodError, /id/)
-        end
-      end
-    end
-
-    context 'when association_default is configured' do
-      before { Blueprinter.configure { |config| config.association_default = 'association default' } }
-
-      let(:blueprint) do
-        Class.new(Blueprinter::Base) do
-          identifier :id
-          association :vehicles, blueprint: Class.new(Blueprinter::Base) { identifier :id }, default_if: Blueprinter::EMPTY_COLLECTION
-          association :nothing, blueprint: Class.new(Blueprinter::Base) { identifier :id } do |_user, _options|
-            nil
-          end
-        end
-      end
-
-      include_examples 'the same output', [{}]
-    end
+    expect(render(blueprint, skip: [:last_name])).to eq(id: 1, first_name: 'Meg')
   end
 
-  context 'with datetime formats' do
-    let(:blueprint) do
-      Class.new(Blueprinter::Base) do
-        identifier :id
-        field :birthday, datetime_format: '%Y/%m/%d'
-        field :created_at, datetime_format: ->(time) { time.to_i }
-        field :updated_at
-        field :first_name
-      end
+  it 'calls blocks with the object and options, and Symbol#to_proc blocks with the object only' do
+    blueprint = Class.new(Blueprinter::Base) do
+      field(:full_name) { |user, options| "#{options[:prefix]}#{user.first_name} #{user.last_name}" }
+      field :upcased, &->(user, _options) { user.first_name.upcase }
+      field :first_name, name: :symbol_proc, &:first_name
+      field(:keywords) { |user, view:, **| "#{user.id}@#{view}" }
     end
 
-    include_examples 'the same output', [{}]
-
-    context 'when datetime_format is configured globally' do
-      before { Blueprinter.configure { |config| config.datetime_format = '%d-%m-%Y' } }
-
-      include_examples 'the same output', [{}]
-    end
-
-    it 'raises the same error for an invalid format' do
-      invalid = Class.new(Blueprinter::Base) { field :first_name, datetime_format: '%Y' }
-
-      [false, true].each do |compile_views|
-        Blueprinter.configuration.compile_views = compile_views
-        expect { invalid.render_as_hash(user) }.to raise_error(Blueprinter::DateTimeFormatter::InvalidDateTimeFormatterError)
-      end
-    end
+    expect(render(blueprint, prefix: 'Dr. '))
+      .to eq(full_name: 'Dr. Meg Ryan', keywords: '1@default', symbol_proc: 'Meg', upcased: 'MEG')
   end
 
-  context 'with global if/unless' do
-    before do
-      Blueprinter.configure do |config|
-        config.if = ->(name, _object, options) { !options[:skip]&.include?(name) }
-        config.unless = ->(name, _object, _options) { name == :description }
-      end
+  it 'reads fields with their own defaults or datetime_format through their extractor' do
+    blueprint = Class.new(Blueprinter::Base) do
+      field :deleted_at, default: 'N/A'
+      field :company, default: 'none', default_if: Blueprinter::EMPTY_STRING
+      field :birthday, datetime_format: '%Y/%m/%d'
+      field(:empty_list, default: [0], default_if: Blueprinter::EMPTY_COLLECTION) { |_user, _options| [] }
     end
 
+    expect(render(blueprint, user_class.new(company: '', birthday: Date.new(1994, 3, 4))))
+      .to eq(birthday: '1994/03/04', company: 'none', deleted_at: 'N/A', empty_list: [0])
+    expect { render(Class.new(Blueprinter::Base) { field :first_name, datetime_format: '%Y' }) }
+      .to raise_error(Blueprinter::DateTimeFormatter::InvalidDateTimeFormatterError)
+  end
+
+  it 'uses custom extractors' do
+    upcase = Class.new(Blueprinter::Extractor) do
+      def extract(field_name, object, _local_options, _options = {})
+        object.public_send(field_name).to_s.upcase
+      end
+    end
+    blueprint = Class.new(Blueprinter::Base) do
+      field :first_name, extractor: upcase
+      field :last_name, extractor: Class.new(Blueprinter::AutoExtractor).new
+    end
+
+    expect(render(blueprint)).to eq(first_name: 'MEG', last_name: 'Ryan')
+  end
+
+  context 'with global settings set before the first render' do
     let(:blueprint) do
+      vehicles = vehicle_blueprint
       Class.new(Blueprinter::Base) do
-        identifier :id
-        fields :first_name, :last_name, :description
-        field :company, if: ->(*) { true }
+        fields :birthday, :deleted_at, :first_name
+        association(:nothing, blueprint: vehicles) { |_user, _options| nil }
+        association :vehicles, blueprint: vehicles
       end
     end
 
-    include_examples 'the same output', [{}, { skip: %i[last_name company] }]
+    it 'formats dates and times with datetime_format' do
+      Blueprinter.configure { |config| config.datetime_format = '%d-%m-%Y' }
+
+      expect(render(blueprint)).to include(birthday: '04-03-1994', deleted_at: nil, first_name: 'Meg')
+    end
+
+    it 'replaces nil association values with association_default' do
+      Blueprinter.configure { |config| config.association_default = 'none' }
+
+      expect(render(blueprint)).to include(deleted_at: nil, nothing: 'none')
+    end
+
+    it 'replaces nil values with field_default, including the value an association reads' do
+      Blueprinter.configure { |config| config.field_default = 'N/A' }
+      without_associations = Class.new(Blueprinter::Base) { fields :deleted_at, :first_name }
+
+      expect(render(without_associations)).to eq(deleted_at: 'N/A', first_name: 'Meg')
+      expect { render(blueprint) }.to raise_error(NoMethodError, /id/)
+    end
+
+    it 'keeps the configuration a view was compiled with at its first render' do
+      without_associations = Class.new(Blueprinter::Base) { field :deleted_at }
+      expect(render(without_associations)).to eq(deleted_at: nil)
+
+      Blueprinter.configure { |config| config.field_default = 'N/A' }
+
+      expect(render(without_associations)).to eq(deleted_at: nil)
+      expect(render(Class.new(without_associations))).to eq(deleted_at: 'N/A')
+    end
   end
 
   context 'with associations' do
-    let(:blueprint) do
-      vehicles = vehicle_blueprint
-      Class.new(Blueprinter::Base) do
-        identifier :id
-        field :first_name
-        association :vehicles, blueprint: vehicles
-        association :first_vehicle, blueprint: vehicles, view: :extended, exclude_if_nil: true do |user, _options|
-          user.vehicles.min_by(&:id)
-        end
-        association :vehicles, name: :conditional_vehicles, blueprint: vehicles,
-                               if: ->(_name, _user, options) { options[:with_vehicles] }
+    let(:log) { [] }
 
-        view :extended do
-          association :vehicles, blueprint: vehicles, view: :extended
-        end
+    before do
+      calls = log
+      Blueprinter.configure do |config|
+        config.extensions << Class.new(Blueprinter::Extension) do
+          define_method(:pre_render) do |object, _blueprint, view, _options|
+            calls << [object.respond_to?(:make) || object.is_a?(Array) ? :vehicles : :user, view]
+            object
+          end
+        end.new
       end
     end
 
-    before { Blueprinter.configure { |config| config.extensions << logging_extension } }
-
-    include_examples 'the same output', [{}, { with_vehicles: true }, { view: :extended, with_vehicles: true }]
-  end
-
-  context 'with associations that use the standard code path' do
-    let(:blueprint) do
+    it 'renders each association with its blueprint and view, and runs extensions for it' do
       vehicles = vehicle_blueprint
-      Class.new(Blueprinter::Base) do
+      blueprint = Class.new(Blueprinter::Base) do
         identifier :id
+        association :vehicles, blueprint: vehicles
+        association :vehicles, name: :detailed, blueprint: vehicles, view: :extended,
+                               if: ->(_name, _user, options) { options[:detailed] }
+        association(:first_vehicle, blueprint: vehicles, exclude_if_nil: true) { |user, _options| user.vehicles&.first }
+      end
+
+      expect(render(blueprint, user_class.new(id: 2))).to eq(id: 2, vehicles: nil)
+      expect(render(blueprint, detailed: true)).to eq(
+        id: 1,
+        detailed: [{ id: 10, make: 'Super Car', miles: 5, model: 'ACME', seen_view: :extended },
+                   { id: 11, make: nil, miles: nil, model: nil, seen_view: :extended }],
+        first_vehicle: { id: 10, make: 'Super Car', model: 'ACME' },
+        vehicles: [{ id: 10, make: 'Super Car', model: 'ACME' }, { id: 11, make: nil, model: nil }]
+      )
+      expect(log.last(4)).to eq([%i[user default], %i[vehicles extended], %i[vehicles default], %i[vehicles default]])
+    end
+
+    it 'reads associations with a dynamic blueprint or :options through their extractor' do
+      vehicles = vehicle_blueprint
+      owned = Class.new(Blueprinter::Base) { field(:owner) { |_vehicle, options| options[:owner] } }
+      blueprint = Class.new(Blueprinter::Base) do
         association :vehicles, name: :dynamic, blueprint: ->(_vehicles) { vehicles }
-        association :vehicles, name: :with_static_options, blueprint: vehicles, view: :extended, options: { extra: 1 }
-        association :vehicles, name: :with_dynamic_options, blueprint: vehicles,
-                               options: ->(user) { { owner: user.first_name } }
+        association :vehicles, name: :static_options, blueprint: owned, options: { owner: 'static' }
+        association :vehicles, name: :dynamic_options, blueprint: owned, options: ->(user) { { owner: user.first_name } }
       end
+
+      expect(render(blueprint, user_class.new(first_name: 'Meg', vehicles: [user.vehicles.first]))).to eq(
+        dynamic: [{ id: 10, make: 'Super Car', model: 'ACME' }],
+        dynamic_options: [{ owner: 'Meg' }],
+        static_options: [{ owner: 'static' }]
+      )
     end
 
-    before { Blueprinter.configure { |config| config.extensions << logging_extension } }
-
-    include_examples 'the same output', [{}]
-  end
-
-  context 'with an associated Blueprint that overrides hashify' do
-    let(:blueprint) do
-      vehicles = Class.new(vehicle_blueprint) do
-        def self.hashify(object, view_name:, local_options:)
-          result = super
-          result.is_a?(Array) ? result.map { |item| item.merge(wrapped: true) } : result.merge(wrapped: true)
-        end
-      end
-      Class.new(Blueprinter::Base) do
-        identifier :id
-        association :vehicles, blueprint: vehicles
-      end
-    end
-
-    include_examples 'the same output', [{}]
-  end
-
-  context 'with an associated Blueprint that writes to options' do
-    let(:blueprint) do
-      vehicles = Class.new(Blueprinter::Base) do
+    it "uses the associated blueprint's hashify, and keeps options it changes to itself" do
+      wrapped = Class.new(Blueprinter::Base) do
         identifier :id
         field :make, if: ->(_name, _vehicle, options) { options[:written_by_association] = true }
+
+        def self.hashify(object, view_name:, local_options:)
+          super.map { |vehicle| vehicle.merge(wrapped: true) }
+        end
       end
-      Class.new(Blueprinter::Base) do
-        identifier :id
-        association :vehicles, blueprint: vehicles
+      blueprint = Class.new(Blueprinter::Base) do
+        association :vehicles, blueprint: wrapped
         field(:written_by_association) { |_user, options| options[:written_by_association] }
       end
+
+      expect(render(blueprint)).to eq(
+        vehicles: [{ id: 10, make: 'Super Car', wrapped: true }, { id: 11, make: nil, wrapped: true }],
+        written_by_association: nil
+      )
     end
 
-    include_examples 'the same output', [{}]
+    it 'raises for an unknown association view only when there is a value to render' do
+      vehicles = vehicle_blueprint
+      broken = Class.new(Blueprinter::Base) { association :vehicles, blueprint: vehicles, view: :missing }
+      nil_broken = Class.new(Blueprinter::Base) do
+        association(:nothing, blueprint: vehicles, view: :missing) { |_user, _options| nil }
+      end
+
+      expect { render(broken) }.to raise_error(Blueprinter::Errors::UnknownView, "View 'missing' is not defined")
+      expect(render(nil_broken)).to eq(nothing: nil)
+    end
   end
 
-  context 'with a custom extractor' do
-    let(:upcase_extractor) do
-      Class.new(Blueprinter::Extractor) do
-        def extract(field_name, object, _local_options, _options = {})
-          object.public_send(field_name).to_s.upcase
+  it 'runs transformers after the fields, default view first' do
+    blueprint = Class.new(Blueprinter::Base) do
+      identifier :id
+      field :first_name
+      transform(Class.new(Blueprinter::Transformer) do
+        def transform(hash, object, options)
+          hash[:transformed] = "#{object.id}-#{options[:view]}"
         end
-      end
-    end
+      end)
 
-    let(:blueprint) do
-      extractor = upcase_extractor
-      Class.new(Blueprinter::Base) do
-        identifier :id
-        field :first_name, extractor: extractor
-        field :last_name, extractor: Class.new(Blueprinter::AutoExtractor).new
-        field :company
-      end
-    end
-
-    include_examples 'the same output', [{}]
-  end
-
-  context 'with transformers' do
-    let(:blueprint) do
-      Class.new(Blueprinter::Base) do
-        identifier :id
-        field :first_name
+      view :extended do
+        field :last_name
         transform(Class.new(Blueprinter::Transformer) do
-          def transform(hash, object, options)
-            hash[:transformed] = "#{object.id}-#{options[:view]}"
+          def transform(hash, _object, _options)
+            hash.delete(:first_name)
           end
         end)
-
-        view :extended do
-          field :last_name
-          transform(Class.new(Blueprinter::Transformer) do
-            def transform(hash, _object, _options)
-              hash.delete(:first_name)
-            end
-          end)
-        end
       end
     end
 
-    include_examples 'the same output', [{}, { view: :extended }]
+    expect(render(blueprint)).to eq(id: 1, first_name: 'Meg', transformed: '1-default')
+    expect(render(blueprint, view: :extended)).to eq(id: 1, last_name: 'Ryan', transformed: '1-extended')
   end
 
-  context 'with Hash objects and unusual names' do
-    let(:blueprint) do
-      vehicles = vehicle_blueprint
-      Class.new(Blueprinter::Base) do
-        identifier :id
-        field :first_name
-        field :'kebab-name', name: :'Kebab Name'
-        association :vehicles, blueprint: vehicles
+  it 'sorts fields by definition when configured' do
+    Blueprinter.configure { |config| config.sort_fields_by = :definition }
+    blueprint = Class.new(Blueprinter::Base) do
+      field :last_name
+      identifier :id
+      field :first_name
+
+      view :normal do
+        field :company
       end
-    end
-    let(:objects) do
-      {
-        'a Hash' => { id: 1, first_name: 'Meg', 'kebab-name': 'k', vehicles: [{ id: 2, make: 'A', model: 'B' }] },
-        'a mixed Array' => [{ id: 1, first_name: 'Meg', vehicles: nil }, Struct.new(:id, :first_name, :'kebab-name', :vehicles).new(2, 'Ann', 'x', [])]
-      }
-    end
 
-    include_examples 'the same output', [{}]
-  end
-
-  context 'with fields sorted by definition' do
-    before { Blueprinter.configure { |config| config.sort_fields_by = :definition } }
-
-    let(:blueprint) do
-      Class.new(Blueprinter::Base) do
-        field :last_name
-        identifier :id
-        field :first_name
-
-        view :normal do
-          field :company
-        end
-
-        view :extended do
-          field :position
-          include_view :normal
-        end
+      view :extended do
+        field :birthday
+        include_view :normal
       end
     end
 
-    include_examples 'the same output', [{}, { view: :extended }]
+    expect(render(blueprint, view: :extended).keys).to eq(%i[id last_name first_name birthday company])
   end
 
-  context 'with inheritance and an identifier redefined as a field' do
-    let(:blueprint) do
-      parent = Class.new(Blueprinter::Base) do
-        identifier :id
-        field :id, name: :id
-        field :first_name
-      end
-      Class.new(parent) { field :last_name }
+  it 'keeps the first position and the last value of a name defined twice' do
+    parent = Class.new(Blueprinter::Base) do
+      identifier :id
+      field :first_name, name: :id
+      field :last_name
     end
 
-    include_examples 'the same output', [{}]
-  end
-
-  it 'raises the same error for an unknown association view' do
-    vehicles = vehicle_blueprint
-    broken = Class.new(Blueprinter::Base) { association :vehicles, blueprint: vehicles, view: :missing }
-    nil_broken = Class.new(Blueprinter::Base) do
-      association(:nothing, blueprint: vehicles, view: :missing) { |_user, _options| nil }
-    end
-
-    [false, true].each do |compile_views|
-      Blueprinter.configuration.compile_views = compile_views
-      expect { broken.render_as_hash(user) }.to raise_error(Blueprinter::Errors::UnknownView, "View 'missing' is not defined")
-      expect(nil_broken.render_as_hash(user)).to eq(nothing: nil)
-    end
+    expect(render(Class.new(parent) { field :company }).to_a)
+      .to eq([[:id, 'Meg'], [:company, 'Procore'], [:last_name, 'Ryan']])
   end
 end

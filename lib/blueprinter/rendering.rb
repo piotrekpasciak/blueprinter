@@ -126,48 +126,13 @@ module Blueprinter
       # Since we're currently providing the current view in the local_options hash when we extract fields, we can merge
       # it in ahead of time to avoid allocating a new hash for every field extraction.
       local_options_with_view = local_options.merge(view: view_name)
-      compiled = compiled_view(view_name)
+      compiled = view_collection.compiled(view_name)
 
       if array_like?(object)
-        object.map do |obj|
-          next compiled.call(obj, local_options_with_view) if compiled && !obj.is_a?(Hash)
-
-          object_to_hash(obj, view_name:, local_options: local_options_with_view)
-        end
+        object.map { |obj| compiled.call(obj, local_options_with_view) }
       else
-        hash_for(object, view_name:, local_options: local_options_with_view, compiled:)
+        compiled.call(object, local_options_with_view)
       end
-    end
-
-    # Hashes always use the standard path: the compiled view reads values with method calls
-    def hash_for(object, view_name:, local_options:, compiled:)
-      return compiled.call(object, local_options) if compiled && !object.is_a?(Hash)
-
-      object_to_hash(object, view_name:, local_options:)
-    end
-
-    # The compiled view (see ViewCompiler), or nil when Configuration#views_compilable? is false
-    def compiled_view(view_name)
-      view_collection.compiled(view_name) if Blueprinter.configuration.views_compilable?
-    end
-
-    def object_to_hash(object, view_name:, local_options:)
-      result_hash = {}
-
-      view_collection.fields_for(view_name).each do |field|
-        next if field.skip?(field.name, object, local_options)
-
-        value = field.extract(object, local_options)
-        next if value.nil? && field.options[:exclude_if_nil]
-
-        result_hash[field.name] = value
-      end
-
-      view_collection.transformers(view_name).each do |transformer|
-        transformer.transform(result_hash, object, local_options)
-      end
-
-      result_hash
     end
 
     def jsonify(data)
